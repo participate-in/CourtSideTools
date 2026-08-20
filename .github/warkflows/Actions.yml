@@ -1,8 +1,8 @@
-﻿name: Deploy Blazor WASM to GitHub Pages
+﻿name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ master ] # リポジトリのメインブランチ名
+    branches: [ master ] # masterブランチへのプッシュで起動
 
 permissions:
   contents: read
@@ -20,42 +20,28 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      # 1. コードの取得
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # 2. .NET SDK のセットアップ
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.x' # 使用している.NETのバージョンに合わせて変更してください (例: 7.0.x, 8.0.x)
 
-      # 3. Blazor アプリのビルド & 発行
-      - name: Publish Blazor App
-        run: dotnet publish -c Release -o release
+      - name: Publish Blazor WebAssembly
+        run: dotnet publish -c Release -o output
 
-      # 4. base href の書き換え (CourtSideKit 用)
-      - name: Rewrite base href
-        run: sed -i 's/<base href="\/" \/>/<base href="\/CourtSideKit\/" \/>/g' release/wwwroot/index.html
-
-      # 5. Jekyll無効化のための .nojekyll ファイル生成
       - name: Add .nojekyll
-        run: touch release/wwwroot/.nojekyll
+        run: touch output/wwwroot/.nojekyll
 
-      # 6. 404対策用に index.html を 404.html にコピー
-      - name: Copy index.html to 404.html
-        run: cp release/wwwroot/index.html release/wwwroot/404.html
-
-      # 7. GitHub Pages のセットアップ
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v4
 
-      # 8. アティファクト（配信ファイル）のアップロード
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './release/wwwroot'
+          path: 'output/wwwroot'
 
-      # 9. GitHub Pages へのデプロイ
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
