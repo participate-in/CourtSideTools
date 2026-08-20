@@ -1,0 +1,647 @@
+﻿@page "/Tournament"
+@inject IJSRuntime JSRuntime
+@using System.Text.Json
+@using System.ComponentModel.DataAnnotations
+
+
+<h3>トーナメント戦</h3>
+<div class="container mt-4">
+
+    <div class="mb-4">
+        <div class="btn-group" role="group">
+            <button type="button" class="btn @(!isDoublesMode ? "btn-dark fw-bold" : "btn-outline-dark")" @onclick="() => ChangeMode(false)">
+                <i class="bi bi-person-fill"></i> シングルス戦
+            </button>
+            <button type="button" class="btn @(isDoublesMode ? "btn-dark fw-bold" : "btn-outline-dark")" @onclick="() => ChangeMode(true)">
+                <i class="bi bi-people-fill"></i> ダブルス戦
+            </button>
+        </div>
+    </div>
+
+    <div class="card mb-4 border-primary">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">
+                <i class="bi bi-person-plus"></i> 参加メンバー登録
+            </h5>
+            <span class="badge bg-white text-primary fw-bold fs-6">
+                現在: @players.Count 人
+            </span>
+        </div>
+        <div class="card-body">
+            <div class="input-group mb-3">
+                <input @ref="playerNameInput" autofocus type="text" class="form-control"
+                       placeholder="プレイヤーを入力（例: 佐藤）" @bind="newPlayerName" @onkeyup="HandleKeyUp" />
+                <button class="btn btn-primary" type="button" @onclick="AddPlayer">追加</button>
+            </div>
+
+            @if (players.Any())
+            {
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var player in players)
+                    {
+                        <span class="badge bg-secondary d-flex align-items-center p-2">
+                            @player
+                            <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.5rem;" @onclick="() => RemovePlayer(player)"></button>
+                        </span>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (isDoublesMode)
+    {
+        <div class="card mb-4 border-info">
+            <div class="card-header bg-info text-white">
+                <h5 class="card-title mb-0"><i class="bi bi-link-45deg"></i> ダブルスペアの作成</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-2 align-items-center">
+                    <div class="col-sm-4">
+                        <select class="form-select" @bind="pairSelect1">
+                            <option value="">-- 1人目を選択 --</option>
+                            @foreach (var p in players)
+                            {
+                                <option value="@p">@p</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-auto">と</div>
+                    <div class="col-sm-4">
+                        <select class="form-select" @bind="pairSelect2">
+                            <option value="">-- 2人目を選択 --</option>
+                            @foreach (var p in players)
+                            {
+                                <option value="@p">@p</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-3">
+                        <button class="btn btn-info text-white w-100" @onclick="AddPair">ペアを登録</button>
+                    </div>
+                </div>
+
+                <div class="mt-3 d-flex gap-2">
+                    <button class="btn btn-outline-info btn-sm" type="button" @onclick="GenerateRandomPairs">
+                        <i class="bi bi-shuffle"></i> ランダムにペアを生成
+                    </button>
+                    @if (doublesPairs.Any())
+                    {
+                        <button class="btn btn-outline-danger btn-sm" type="button" @onclick="ClearAllPairs">
+                            <i class="bi bi-trash"></i> ペアをすべてクリア
+                        </button>
+                    }
+                </div>
+
+                @if (doublesPairs.Any())
+                {
+                    <div class="d-flex flex-wrap gap-2 mt-3">
+                        @foreach (var pair in doublesPairs)
+                        {
+                            <span class="badge bg-info text-white d-flex align-items-center p-2">
+                                @pair
+                                <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.5rem;" @onclick="() => RemovePair(pair)"></button>
+                            </span>
+                        }
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(alertMessage))
+                {
+                    <div class="alert alert-warning mt-3 mb-0 d-flex align-items-center gap-2 animate__animated animate__fadeIn">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <div>@alertMessage</div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @if ((!isDoublesMode && players.Count >= 2) || (isDoublesMode && doublesPairs.Count >= 2))
+    {
+        <div class="mb-4 d-flex gap-2">
+            <button class="btn btn-success flex-grow-1 fw-bold p-2" @onclick="GenerateTournament">
+                <i class="bi bi-play-fill"></i> @(isDoublesMode ? "ダブルス" : "シングルス") トーナメント表を生成
+            </button>
+            <button class="btn btn-outline-danger" @onclick="ClearCurrentTournament">表をリセット</button>
+        </div>
+    }
+
+    @if (rounds.Any())
+    {
+        <h5 class="card-title mb-4 text-center">トーナメント表</h5>
+
+        <div class="d-flex flex-nowrap overflow-auto gap-4 py-3 align-items-center " style="min-width: 600px;">
+            @for (int r = 0; r < rounds.Count; r++)
+            {
+                var roundIndex = r;
+                var matchesInRound = rounds[roundIndex];
+                var isFinalRound = (roundIndex == rounds.Count - 1);
+
+                <div class="d-flex flex-column justify-content-around h-100 gap-4">
+                    <div class="text-center text-muted small fw-bold">
+                        @(isFinalRound ? "決勝戦" : $"{roundIndex + 1}回戦")
+                    </div>
+                    @foreach (var match in matchesInRound)
+                    {
+                        <div class="border rounded p-2 shadow-sm @(isFinalRound ? "bg-dark text-white" : "bg-white")" style="width: 240px;">
+                            <div class="d-flex align-items-center mb-1 gap-1">
+                                @* --- TeamA のボタン表示部分 --- *@
+                                <button class="btn btn-sm text-start text-truncate flex-grow-1 @(match.Winner == match.TeamA && !string.IsNullOrEmpty(match.Winner) ? (isFinalRound ? "btn-warning fw-bold" : "btn-success") : (isFinalRound ? "btn-outline-light" : "btn-outline-secondary"))"
+                                        disabled="@(GetDisplayName(match.TeamA) == "（待機中）" || GetDisplayName(match.TeamA) == "（不戦勝）")"
+                                        @onclick="() => SetWinner(roundIndex, match, GetDisplayName(match.TeamA))">
+                                    @GetDisplayName(match.TeamA)
+                                </button>
+                                <input type="number" class="form-control form-control-sm text-center @(isFinalRound ? "bg-dark text-white border-secondary" : "")" style="width: 50px;"
+                                       @bind="match.ScoreA" @bind:after="SaveToLocalStorage" disabled="@(GetDisplayName(match.TeamA) == "（待機中）" || GetDisplayName(match.TeamA) == "（不戦勝）")" />
+                            </div>
+
+                            <div class="d-flex align-items-center gap-1">
+                                @* --- TeamB のボタン表示部分 --- *@
+                                <button class="btn btn-sm text-start text-truncate flex-grow-1 @(match.Winner == match.TeamB && !string.IsNullOrEmpty(match.Winner) ? (isFinalRound ? "btn-warning fw-bold" : "btn-success") : (isFinalRound ? "btn-outline-light" : "btn-outline-secondary"))"
+                                        disabled="@(GetDisplayName(match.TeamB) == "（待機中）" || GetDisplayName(match.TeamB) == "（不戦勝）")"
+                                        @onclick="() => SetWinner(roundIndex, match, GetDisplayName(match.TeamB))">
+                                    @GetDisplayName(match.TeamB)
+                                </button>
+                                <input type="number" class="form-control form-control-sm text-center @(isFinalRound ? "bg-dark text-white border-secondary" : "")" style="width: 50px;"
+                                       @bind="match.ScoreB" @bind:after="SaveToLocalStorage" disabled="@(GetDisplayName(match.TeamB) == "（待機中）" || GetDisplayName(match.TeamB) == "（不戦勝）")" />
+                            </div>
+                        </div>
+                    }
+
+                    @if (isFinalRound && !string.IsNullOrEmpty(matchesInRound.FirstOrDefault()?.Winner))
+                    {
+                        <div class="alert alert-warning text-center mt-3 p-2 fw-bold">
+                            🏆 優勝: @GetDisplayName(matchesInRound.First().Winner!)
+                        </div>
+                    }
+                </div>
+
+                @if (!isFinalRound)
+                {
+                    <div class="text-muted"><i class="bi bi-chevron-right fs-3"></i></div>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string newPlayerName = "";
+    private List<string> players = new();
+    private ElementReference playerNameInput;
+    public class MatchResult;
+
+    // ★追加：お知らせメッセージを保持する変数
+    private string alertMessage = "";
+    private List<MatchResult> singlesMatches = new(); // シングルス用の試合データ
+    private List<MatchResult> doublesMatches = new(); // ダブルス用の試合データ
+    private List<string> doublesPairs = new();
+    // モードに応じて、参照する「対戦相手リスト」と「試合データ」を切り替えるプロパティ
+    private List<string> CurrentTargetList => isDoublesMode ? doublesPairs : players;
+    private List<MatchResult> CurrentMatches => isDoublesMode ? doublesMatches : singlesMatches; // ★追加：手動で登録された固定ペアだけを保持するリスト
+    private List<string> fixedPairs = new();
+    private string pairSelect1 = "";
+    private string pairSelect2 = "";
+
+    private bool isDoublesMode = false;
+    private List<List<MatchModel>> rounds = new();
+
+    private enum MatchType { Singles, Doubles }
+    private MatchType selectedType = MatchType.Singles;
+
+    private bool IsPlayDisabled => selectedType == MatchType.Singles ? players.Count < 2 : players.Count < 4;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // プレイヤー一覧（共通）の復元
+            var savedPlayers = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_common_players");
+            if (!string.IsNullOrEmpty(savedPlayers)) players = JsonSerializer.Deserialize<List<string>>(savedPlayers) ?? new();
+
+            // ダブルスペア一覧の復元
+            var savedPairs = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_doubles_pairs");
+            if (!string.IsNullOrEmpty(savedPairs)) doublesPairs = JsonSerializer.Deserialize<List<string>>(savedPairs) ?? new();
+
+            // 固定ペアの復元
+            var fixedPairsJson = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "fixedPairs");
+            if (!string.IsNullOrEmpty(fixedPairsJson))
+            {
+                fixedPairs = JsonSerializer.Deserialize<List<string>>(fixedPairsJson) ?? new();
+            }
+            else
+            {
+                fixedPairs = new List<string>(doublesPairs);
+            }
+
+            // モード状態の復元
+            var savedMode = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_is_doubles_mode");
+            if (!string.IsNullOrEmpty(savedMode) && bool.TryParse(savedMode, out bool isDoubles))
+            {
+                isDoublesMode = isDoubles;
+            }
+
+            // ★追加: トーナメント表（rounds）の復元
+            var savedRounds = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_tournament_rounds");
+            if (!string.IsNullOrEmpty(savedRounds))
+            {
+                rounds = JsonSerializer.Deserialize<List<List<MatchModel>>>(savedRounds) ?? new();
+            }
+
+            // 各試合データの復元
+            var savedSMatches = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_singles_matches");
+            if (!string.IsNullOrEmpty(savedSMatches)) singlesMatches = JsonSerializer.Deserialize<List<MatchResult>>(savedSMatches) ?? new();
+
+            var savedDMatches = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_doubles_matches");
+            if (!string.IsNullOrEmpty(savedDMatches)) doublesMatches = JsonSerializer.Deserialize<List<MatchResult>>(savedDMatches) ?? new();
+        }
+        catch { }
+    }
+
+    private async Task SaveToLocalStorage()
+    {
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", "tennis_common_players", JsonSerializer.Serialize(players));
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", "tennis_doubles_pairs", JsonSerializer.Serialize(doublesPairs));
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", "fixedPairs", JsonSerializer.Serialize(fixedPairs));
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", "tennis_is_doubles_mode", JsonSerializer.Serialize(isDoublesMode));
+
+        // ★追加: トーナメント表（rounds）の保存
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", "tennis_tournament_rounds", JsonSerializer.Serialize(rounds));
+
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", "tennis_singles_matches", JsonSerializer.Serialize(singlesMatches));
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", "tennis_doubles_matches", JsonSerializer.Serialize(doublesMatches));
+    }
+
+    private async Task ChangeMode(bool doublesMode)
+    {
+        isDoublesMode = doublesMode;
+
+        // ★追加: selectedType も一緒に切り替える
+        selectedType = doublesMode ? MatchType.Doubles : MatchType.Singles;
+
+        await SaveToLocalStorage();
+        StateHasChanged();
+    }
+
+    private async Task AddPlayer()
+    {
+        var name = newPlayerName?.Trim();
+
+        // 1. 空白チェック
+        if (string.IsNullOrEmpty(name))
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "名前を入力してください。");
+            await playerNameInput.FocusAsync();
+            return;
+        }
+
+        // 2. 重複チェック（p.Name ではなく、p 自体が名前の文字列）
+        if (players.Any(p => p == name)) // 👈 ここを修正！(または players.Contains(name) でもOK)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "同じ名前のプレイヤーがいます。");
+            newPlayerName = "";
+            await playerNameInput.FocusAsync();
+            return;
+        }
+
+        // 3. どちらのチェックも通過したらリストに追加して保存
+        players.Add(name);
+
+        newPlayerName = "";
+        await SaveToLocalStorage();
+        await playerNameInput.FocusAsync();
+
+    }
+
+    private async Task HandleKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AddPlayer();
+    }
+
+    // ★ここに追加：ランダム自動ペア生成ロジック
+    // ★変更：既存のペアは残し、未登録のメンバーだけでランダムペアを作る
+    private async Task GenerateRandomPairs()
+    {
+        // 毎回メッセージをリセット
+        alertMessage = "";
+
+        // ★重要：一度すべてのペアを「手動登録されたペア」だけの状態に戻す（＝ランダムペアをクリア）
+        doublesPairs = new List<string>(fixedPairs);
+
+        // 1. すでに登録されているペアに含まれているプレイヤーを抽出
+        var registeredPlayers = fixedPairs
+            .SelectMany(p => p.Split(" & "))
+            .ToHashSet();
+
+        // 2. まだどのペアにも属していない「残りのプレイヤー」をリストアップ
+        var remainingPlayers = players
+            .Where(p => !registeredPlayers.Contains(p))
+            .ToList();
+
+        // 残りの人数が2人未満ならペアを作れない
+        if (remainingPlayers.Count < 2)
+        {
+            if (remainingPlayers.Count == 1)
+            {
+                alertMessage = $"参加者が奇数だったため、{remainingPlayers[0]}さんがお休みとなります。";
+            }
+            await SaveToLocalStorage();
+            return;
+        }
+
+        // 3. 残ったプレイヤーのリストをランダムにシャッフル
+        var rand = new Random();
+        var shuffledRemaining = remainingPlayers.OrderBy(_ => rand.Next()).ToList();
+
+        // ★変更：奇数の場合、最後の1人を除外してお知らせに載せる（処理は止めずに続行！）
+        if (shuffledRemaining.Count % 2 != 0)
+        {
+            string excludedPlayer = shuffledRemaining.Last();
+            shuffledRemaining.RemoveAt(shuffledRemaining.Count - 1);
+
+            alertMessage = $"参加者が奇数だったため、{excludedPlayer}さんはお休みとなります。";
+
+        }
+
+        // 4. シャッフルしたメンバーから2人ずつペアを作って追加
+        for (int i = 0; i < shuffledRemaining.Count - 1; i += 2)
+        {
+            string p1 = shuffledRemaining[i];
+            string p2 = shuffledRemaining[i + 1];
+
+            string pairName = $"{p1} & {p2}";
+            doublesPairs.Add(pairName);
+        }
+
+        // メンバー構成が変わったので、古い試合表は一度クリア
+        doublesMatches.Clear();
+
+        await SaveToLocalStorage();
+    }
+
+    // ★変更：一括クリアしたときはメッセージも消す
+    private async Task ClearAllPairs()
+    {
+        doublesPairs.Clear();
+        fixedPairs.Clear();
+        doublesMatches.Clear();
+        alertMessage = ""; // メッセージも消す
+        await SaveToLocalStorage();
+    }
+
+    // ★変更：手動でペアを消したときもメッセージをリセット
+    private async Task RemovePair(string pair)
+    {
+        doublesPairs.Remove(pair);
+        doublesMatches.Clear();
+
+        alertMessage = ""; // メッセージも消す
+        await SaveToLocalStorage();
+    }
+
+
+    // ダブルスのペアを作成・追加
+    private async Task AddPair()
+    {
+        // どちらもまだ誰とも組んでいなければ登録
+        string pairName = $"{pairSelect1} & {pairSelect2}";
+        string reversePairName = $"{pairSelect2} & {pairSelect1}";
+
+        if (string.IsNullOrEmpty(pairSelect1) || string.IsNullOrEmpty(pairSelect2)) return;
+
+        //追加】同じ人が選ばれていないかチェック
+        if (pairSelect1 == pairSelect2)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "同じ人が組まれています。");
+            return;
+        }
+
+
+        // 二人がすでに全く同じ組み合わせでペアを組んでいるかチェック
+        if (doublesPairs.Contains(pairName) || doublesPairs.Contains(reversePairName))
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "二人はすでにペアです。");
+            return;
+        }
+
+        //  選択されたプレイヤー1が、すでに他のペアに含まれていないかチェック
+        // (例: doublesPairs の中に "A & " または " & A" という形で存在するか)
+        bool isPlayer1Registered = doublesPairs.Any(p => p.Split(" & ").Contains(pairSelect1));
+        if (isPlayer1Registered)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"{pairSelect1}さんはペアが決まっています。");
+            return;
+        }
+
+        // 選択されたプレイヤー2が、すでに他のペアに含まれていないかチェック
+        bool isPlayer2Registered = doublesPairs.Any(p => p.Split(" & ").Contains(pairSelect2));
+        if (isPlayer2Registered)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"{pairSelect2}さんはペアが決まっています。");
+            return;
+        }
+
+        // ★変更：両方のリストに追加する
+        doublesPairs.Add(pairName);
+        fixedPairs.Add(pairName);
+
+        // フォームをリセット
+        pairSelect1 = "";
+        pairSelect2 = "";
+        await SaveToLocalStorage();
+    }
+
+    private async Task RemovePlayer(string player)
+    {
+        players.Remove(player);
+        await SaveToLocalStorage();
+    }
+
+    private async Task OnMatchTypeChanged(MatchType type)
+    {
+        selectedType = type;
+        rounds.Clear();
+        await SaveToLocalStorage();
+    }
+
+    private async Task GenerateTournament()
+    {
+        rounds.Clear();
+        if (IsPlayDisabled) return;
+
+        var rand = new Random();
+        List<string> currentRoundElements = new();
+
+        if (isDoublesMode) // ★ selectedType ではなく isDoublesMode で統一
+        {
+            // --- ダブルスモード：登録された doublesPairs をシャッフルしてトーナメントに使用 ---
+            currentRoundElements = doublesPairs.OrderBy(_ => rand.Next()).ToList();
+        }
+        else
+        {
+            // --- シングルスモード：登録された players をシャッフルして使用 ---
+            currentRoundElements = players.OrderBy(_ => rand.Next()).ToList();
+        }
+
+        int roundIndex = 0;
+
+        // ここから先は共通のトーナメント生成ロジック（奇数チームなら先頭へワープ）
+        while (currentRoundElements.Count > 1)
+        {
+            var currentRoundMatches = new List<MatchModel>();
+            var nextRoundElements = new List<string>();
+
+            int elementCount = currentRoundElements.Count;
+            bool hasBye = elementCount % 2 != 0;
+
+            int totalElementsInRound = hasBye ? elementCount + 1 : elementCount;
+            int matchesCount = totalElementsInRound / 2;
+
+            for (int m = 0; m < matchesCount; m++)
+            {
+                var match = new MatchModel
+                {
+                    MatchId = m,
+                    TeamA = currentRoundElements[m * 2],
+                    TeamB = ""
+                };
+
+                if (hasBye && m == matchesCount - 1)
+                {
+                    match.TeamB = "（不戦勝）";
+                    match.Winner = match.TeamA;
+                }
+                else
+                {
+                    match.TeamB = currentRoundElements[m * 2 + 1];
+                }
+
+                currentRoundMatches.Add(match);
+
+                string nextToken = $"Round{roundIndex} Match{m}";
+
+                if (hasBye && m == matchesCount - 1)
+                {
+                    nextRoundElements.Insert(0, nextToken);
+                }
+                else
+                {
+                    nextRoundElements.Add(nextToken);
+                }
+            }
+
+            rounds.Add(currentRoundMatches);
+            currentRoundElements = nextRoundElements;
+            roundIndex++;
+        }
+
+        CheckSystemByes();
+        await SaveToLocalStorage();
+    }
+
+    // 表示中のトーナメント表のみを初期化する（メンバーは消さない）
+    private async Task ClearCurrentTournament()
+    {
+        rounds.Clear(); // ★トーナメント表自体をクリア
+        if (isDoublesMode) doublesMatches.Clear();
+        else singlesMatches.Clear();
+
+        await SaveToLocalStorage();
+    }
+
+    private async Task SetWinner(int currentRoundIndex, MatchModel currentMatch, string winnerName)
+    {
+        if (winnerName == "（待機中）" || winnerName == "（不戦勝）") return;
+
+        if (winnerName == GetDisplayName(currentMatch.TeamA))
+        {
+            currentMatch.Winner = currentMatch.TeamA;
+        }
+        else if (winnerName == GetDisplayName(currentMatch.TeamB))
+        {
+            currentMatch.Winner = currentMatch.TeamB;
+        }
+
+        CheckSystemByes();
+
+        // ★勝者確定時にローカルストレージへ保存
+        await SaveToLocalStorage();
+    }
+
+    private void CheckSystemByes()
+    {
+        for (int depth = 0; depth < rounds.Count; depth++)
+        {
+            for (int r = 0; r < rounds.Count; r++)
+            {
+                foreach (var match in rounds[r])
+                {
+                    if (match.TeamB == "（不戦勝）")
+                    {
+                        string resolvedA = GetDisplayName(match.TeamA);
+                        if (!string.IsNullOrEmpty(resolvedA) && resolvedA != "（待機中）" && resolvedA != "（不戦勝）" && !resolvedA.StartsWith("Round"))
+                        {
+                            match.Winner = match.TeamA;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private string GetDisplayName(string teamName)
+    {
+        if (string.IsNullOrEmpty(teamName)) return "（待機中）";
+        if (teamName == "（不戦勝）") return "（不戦勝）";
+
+        if (teamName.StartsWith("Round") && teamName.Contains("Match"))
+        {
+            try
+            {
+                var parts = teamName.Split(' ');
+                int r = int.Parse(parts[0].Replace("Round", ""));
+                int m = int.Parse(parts[1].Replace("Match", ""));
+
+                if (r >= rounds.Count || m >= rounds[r].Count) return "（待機中）";
+
+                var targetMatch = rounds[r][m];
+
+                if (string.IsNullOrEmpty(targetMatch.Winner))
+                {
+                    return $"{r + 1}回戦 試合{m + 1}の勝者";
+                }
+
+                return GetDisplayName(targetMatch.Winner);
+            }
+            catch
+            {
+                return teamName;
+            }
+        }
+
+        return teamName;
+    }
+
+
+    private async Task LoadFromLocalStorage()
+    {
+        var savedPlayers = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_players");
+        if (!string.IsNullOrEmpty(savedPlayers)) players = JsonSerializer.Deserialize<List<string>>(savedPlayers) ?? new();
+
+        var savedRounds = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_rounds");
+        if (!string.IsNullOrEmpty(savedRounds)) rounds = JsonSerializer.Deserialize<List<List<MatchModel>>>(savedRounds) ?? new();
+
+        var savedType = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "tennis_match_type");
+        if (!string.IsNullOrEmpty(savedType) && Enum.TryParse(savedType, out MatchType type)) selectedType = type;
+    }
+
+    public class MatchModel
+    {
+        public int MatchId { get; set; }
+        public string TeamA { get; set; } = "";
+        public string TeamB { get; set; } = "";
+        public int? ScoreA { get; set; }
+        public int? ScoreB { get; set; }
+        public string? Winner { get; set; }
+    }
+}
